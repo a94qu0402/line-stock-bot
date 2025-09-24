@@ -8,23 +8,30 @@ async function startBot()
     // 等待一下讓環境變數載入
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // 除錯：檢查環境變數
-    console.log('所有環境變數:', Object.keys(process.env));
+    // 檢查環境變數
     console.log('CHANNEL_ACCESS_TOKEN exists:', !!process.env.CHANNEL_ACCESS_TOKEN);
     console.log('CHANNEL_SECRET exists:', !!process.env.CHANNEL_SECRET);
     
-    // 如果還是沒有環境變數，使用硬編碼值（僅用於測試）
     const config = 
     {
-        channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || 'yomu29e7y38nctNG4TbOJVv1bjQgwPor4u4op2lVt6j+LrdmqfPvlsHgob89NtqvkuGpxRvmu1mreGjVFohPLyvr4NjhvNMYSZfdl1Knlt8ePegBMtAq6DfnLsw/ZDHMtwpgBm+O09Eg8AUO++XYKwdB04t89/10/w1cDnyilFU=',
-        channelSecret: process.env.CHANNEL_SECRET || 'ea5894f0375ded97e9ee4d579f073a29'
+        channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+        channelSecret: process.env.CHANNEL_SECRET
     };
     
-    console.log('使用的 config:', { 
-        hasToken: !!config.channelAccessToken, 
-        hasSecret: !!config.channelSecret 
-    });
+    // 檢查必要的環境變數
+    if (!config.channelAccessToken) 
+    {
+        console.error('錯誤: CHANNEL_ACCESS_TOKEN 環境變數未設定');
+        process.exit(1);
+    }
     
+    if (!config.channelSecret) 
+    {
+        console.error('錯誤: CHANNEL_SECRET 環境變數未設定');  
+        process.exit(1);
+    }
+    
+    console.log('環境變數載入成功');
     return config;
 }
 
