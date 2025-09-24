@@ -67,16 +67,41 @@ async function getStockInfo(strStockCode)
             const stockData = response.data.msgArray[0];
             const strStockName = stockNames[strStockCode] || strStockCode;
             
+            // 計算漲跌值和漲跌幅
+            const fCurrentPrice = parseFloat(stockData.z) || 0;
+            const fPreviousClose = parseFloat(stockData.y) || fCurrentPrice;
+            const fPriceChange = fCurrentPrice - fPreviousClose;
+            const fPercentageChange = fPreviousClose !== 0 ? (fPriceChange / fPreviousClose * 100) : 0;
+            
+            // 格式化時間
+            let strFormattedTime = stockData.tlong || 'N/A';
+            if (stockData.tlong && !isNaN(stockData.tlong)) 
+            {
+                const timestamp = parseInt(stockData.tlong);
+                if (timestamp > 1000000000000) 
+                {
+                    // Unix timestamp in milliseconds
+                    const date = new Date(timestamp);
+                    strFormattedTime = date.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+                }
+                else if (timestamp > 1000000000) 
+                {
+                    // Unix timestamp in seconds
+                    const date = new Date(timestamp * 1000);
+                    strFormattedTime = date.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+                }
+            }
+            
             // 格式化回應訊息
             const strMessage = `📈 ${strStockName} (${strStockCode})
-💰 現價: ${stockData.z || 'N/A'}
-📊 漲跌: ${stockData.c || 'N/A'}
-📈 漲跌幅: ${stockData.pz || 'N/A'}%
-🔼 開盤: ${stockData.o || 'N/A'}
-🔽 最高: ${stockData.h || 'N/A'}
-📉 最低: ${stockData.l || 'N/A'}
+💰 現價: ${fCurrentPrice.toFixed(2)}
+📊 漲跌: ${fPriceChange >= 0 ? '+' : ''}${fPriceChange.toFixed(2)}
+📈 漲跌幅: ${fPercentageChange >= 0 ? '+' : ''}${fPercentageChange.toFixed(2)}%
+🔼 開盤: ${parseFloat(stockData.o || 0).toFixed(2)}
+🔽 最高: ${parseFloat(stockData.h || 0).toFixed(2)}
+📉 最低: ${parseFloat(stockData.l || 0).toFixed(2)}
 📦 成交量: ${stockData.v || 'N/A'}
-⏰ 更新時間: ${stockData.tlong || 'N/A'}`;
+⏰ 更新時間: ${strFormattedTime}`;
             
             return strMessage;
         }
