@@ -2,12 +2,29 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const axios = require('axios');
 
+// 除錯：檢查環境變數
+console.log('CHANNEL_ACCESS_TOKEN exists:', !!process.env.CHANNEL_ACCESS_TOKEN);
+console.log('CHANNEL_SECRET exists:', !!process.env.CHANNEL_SECRET);
+
 // LINE BOT 設定（使用環境變數）
 const config = 
 {
-    channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || '',
-    channelSecret: process.env.CHANNEL_SECRET || 'YOUR_CHANNEL_SECRET'
+    channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+    channelSecret: process.env.CHANNEL_SECRET
 };
+
+// 檢查必要的環境變數
+if (!config.channelAccessToken) 
+{
+    console.error('錯誤: CHANNEL_ACCESS_TOKEN 環境變數未設定');
+    process.exit(1);
+}
+
+if (!config.channelSecret) 
+{
+    console.error('錯誤: CHANNEL_SECRET 環境變數未設定');  
+    process.exit(1);
+}
 
 const app = express();
 const client = new line.Client(config);
@@ -103,16 +120,16 @@ async function handleEvent(event)
 例如：P2330 (查詢台積電)
 
 📋 支援的股票代號：
-- 2330 台積電
-- 2317 鴻海  
-- 2454 聯發科
-- 2412 中華電
-- 1303 南亞
-- 1301 台塑
-- 2881 富邦金
-- 2882 國泰金
-- 2308 台達電
-- 3008 大立光
+• 2330 台積電
+• 2317 鴻海  
+• 2454 聯發科
+• 2412 中華電
+• 1303 南亞
+• 1301 台塑
+• 2881 富邦金
+• 2882 國泰金
+• 2308 台達電
+• 3008 大立光
 
 💡 輸入 HELP 查看此說明`;
 
