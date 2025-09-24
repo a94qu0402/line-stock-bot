@@ -2,37 +2,33 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const axios = require('axios');
 
-// 延遲啟動函數
+// 延遲啟動函數，增加重試機制
 async function startBot() 
 {
-    // 等待一下讓環境變數載入
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 檢查環境變數
-    console.log('CHANNEL_ACCESS_TOKEN exists:', !!process.env.CHANNEL_ACCESS_TOKEN);
-    console.log('CHANNEL_SECRET exists:', !!process.env.CHANNEL_SECRET);
-    
-    const config = 
+    // 最多重試 10 次，每次間隔 2 秒
+    for (let iTryCount = 0; iTryCount < 10; iTryCount++) 
     {
-        channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-        channelSecret: process.env.CHANNEL_SECRET
+        console.log(`嘗試載入環境變數 (第 ${iTryCount + 1} 次)`);
+        
+        if (process.env.CHANNEL_ACCESS_TOKEN && process.env.CHANNEL_SECRET) 
+        {
+            console.log('環境變數載入成功');
+            return {
+                channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+                channelSecret: process.env.CHANNEL_SECRET
+            };
+        }
+        
+        console.log('環境變數未載入，等待 2 秒後重試...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    // 如果重試 10 次都失敗，使用備用值
+    console.log('環境變數載入失敗，使用備用配置');
+    return {
+        channelAccessToken: 'yomu29e7y38nctNG4TbOJVv1bjQgwPor4u4op2lVt6j+LrdmqfPvlsHgob89NtqvkuGpxRvmu1mreGjVFohPLyvr4NjhvNMYSZfdl1Knlt8ePegBMtAq6DfnLsw/ZDHMtwpgBm+O09Eg8AUO++XYKwdB04t89/10/w1cDnyilFU=',
+        channelSecret: 'ea5894f0375ded97e9ee4d579f073a29'
     };
-    
-    // 檢查必要的環境變數
-    if (!config.channelAccessToken) 
-    {
-        console.error('錯誤: CHANNEL_ACCESS_TOKEN 環境變數未設定');
-        process.exit(1);
-    }
-    
-    if (!config.channelSecret) 
-    {
-        console.error('錯誤: CHANNEL_SECRET 環境變數未設定');  
-        process.exit(1);
-    }
-    
-    console.log('環境變數載入成功');
-    return config;
 }
 
 // 主程式啟動
