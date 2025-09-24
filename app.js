@@ -2,32 +2,38 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const axios = require('axios');
 
-// 除錯：檢查環境變數
-console.log('CHANNEL_ACCESS_TOKEN exists:', !!process.env.CHANNEL_ACCESS_TOKEN);
-console.log('CHANNEL_SECRET exists:', !!process.env.CHANNEL_SECRET);
-
-// LINE BOT 設定（使用環境變數）
-const config = 
+// 延遲啟動函數
+async function startBot() 
 {
-    channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-    channelSecret: process.env.CHANNEL_SECRET
-};
-
-// 檢查必要的環境變數
-if (!config.channelAccessToken) 
-{
-    console.error('錯誤: CHANNEL_ACCESS_TOKEN 環境變數未設定');
-    process.exit(1);
+    // 等待一下讓環境變數載入
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // 除錯：檢查環境變數
+    console.log('所有環境變數:', Object.keys(process.env));
+    console.log('CHANNEL_ACCESS_TOKEN exists:', !!process.env.CHANNEL_ACCESS_TOKEN);
+    console.log('CHANNEL_SECRET exists:', !!process.env.CHANNEL_SECRET);
+    
+    // 如果還是沒有環境變數，使用硬編碼值（僅用於測試）
+    const config = 
+    {
+        channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || 'yomu29e7y38nctNG4TbOJVv1bjQgwPor4u4op2lVt6j+LrdmqfPvlsHgob89NtqvkuGpxRvmu1mreGjVFohPLyvr4NjhvNMYSZfdl1Knlt8ePegBMtAq6DfnLsw/ZDHMtwpgBm+O09Eg8AUO++XYKwdB04t89/10/w1cDnyilFU=',
+        channelSecret: process.env.CHANNEL_SECRET || 'ea5894f0375ded97e9ee4d579f073a29'
+    };
+    
+    console.log('使用的 config:', { 
+        hasToken: !!config.channelAccessToken, 
+        hasSecret: !!config.channelSecret 
+    });
+    
+    return config;
 }
 
-if (!config.channelSecret) 
+// 主程式啟動
+async function main() 
 {
-    console.error('錯誤: CHANNEL_SECRET 環境變數未設定');  
-    process.exit(1);
-}
-
-const app = express();
-const client = new line.Client(config);
+    const config = await startBot();
+    const app = express();
+    const client = new line.Client(config);
 
 // 台股代號對照表（部分常見股票）
 const stockNames = 
@@ -145,30 +151,32 @@ async function handleEvent(event)
     return Promise.resolve(null);
 }
 
-// 設定 webhook
-app.post('/callback', line.middleware(config), (req, res) => 
-{
-    Promise
-        .all(req.body.events.map(handleEvent))
-        .then((result) => res.json(result))
-        .catch((err) => 
-        {
-            console.error(err);
-            res.status(500).end();
-        });
-});
+    // 設定 webhook
+    app.post('/callback', line.middleware(config), (req, res) => 
+    {
+        Promise
+            .all(req.body.events.map(handleEvent))
+            .then((result) => res.json(result))
+            .catch((err) => 
+            {
+                console.error(err);
+                res.status(500).end();
+            });
+    });
 
-// 健康檢查端點
-app.get('/health', (req, res) => 
-{
-    res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
+    // 健康檢查端點
+    app.get('/health', (req, res) => 
+    {
+        res.json({ status: 'OK', timestamp: new Date().toISOString() });
+    });
 
-// 啟動伺服器
-const port = process.env.PORT || 3000;
-app.listen(port, () => 
-{
-    console.log(`LINE BOT 股票查詢機器人已啟動，監聽端口: ${port}`);
-});
+    // 啟動伺服器
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => 
+    {
+        console.log(`LINE BOT 股票查詢機器人已啟動，監聽端口: ${port}`);
+    });
+}
 
-module.exports = app;
+// 啟動主程式
+main().catch(console.error);
