@@ -5,7 +5,6 @@ const axios = require('axios');
 // 延遲啟動函數，增加重試機制
 async function startBot() 
 {
-    // 最多重試 10 次，每次間隔 2 秒
     for (let iTryCount = 0; iTryCount < 10; iTryCount++) 
     {
         console.log(`嘗試載入環境變數 (第 ${iTryCount + 1} 次)`);
@@ -23,11 +22,9 @@ async function startBot()
         await new Promise(resolve => setTimeout(resolve, 2000));
     }
     
-    // 如果重試 10 次都失敗，拋出錯誤
     throw new Error('無法載入必要的環境變數 CHANNEL_ACCESS_TOKEN 和 CHANNEL_SECRET');
 }
 
-// 主程式啟動
 async function main() 
 {
     try 
@@ -36,16 +33,15 @@ async function main()
         const app = express();
         const client = new line.Client(config);
 
-        const ALERT_POLL_INTERVAL_MS = 60000; // 1 minute interval for background checks
+        const ALERT_POLL_INTERVAL_MS = 60000; 
         const VOLUME_HISTORY_LIMIT = 20;
         const VOLUME_MIN_SAMPLES = 3;
 
-        // Alert stores keyed by userId
-        const userPriceAlerts = new Map(); // Map<string, Array<{ stockCode, direction, targetPrice }>>
-        const userVolumeAlerts = new Map(); // Map<string, Array<{ stockCode, multiplier }>>
-        const volumeHistory = new Map(); // Map<string, Array<number>> for rolling averages
+        const userPriceAlerts = new Map(); // 價格警報
+        const userVolumeAlerts = new Map(); // 量能警報
+        const userChangeAlerts = new Map(); // 漲跌幅警報
+        const volumeHistory = new Map();
 
-        // 台股代號對照表（部分常見股票）
         const stockNames = 
         {
             '2330': '台積電',
@@ -62,7 +58,6 @@ async function main()
 
         async function fetchStockData(strStockCode)
         {
-            // 使用台灣證券交易所API
             const strUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${strStockCode}.tw`;
             const response = await axios.get(strUrl);
 
@@ -70,11 +65,9 @@ async function main()
             {
                 return response.data.msgArray[0];
             }
-
             return null;
         }
 
-        // 股票資訊查詢函數
         async function getStockInfo(strStockCode) 
         {
             try 
@@ -84,14 +77,11 @@ async function main()
                 if (stockData)
                 {
                     const strStockName = stockNames[strStockCode] || strStockCode;
-                    
-                    // 計算漲跌值和漲跌幅
                     const fCurrentPrice = parseFloat(stockData.z) || 0;
                     const fPreviousClose = parseFloat(stockData.y) || fCurrentPrice;
                     const fPriceChange = fCurrentPrice - fPreviousClose;
                     const fPercentageChange = fPreviousClose !== 0 ? (fPriceChange / fPreviousClose * 100) : 0;
-                    
-                    // 格式化時間
+
                     let strFormattedTime = stockData.tlong || 'N/A';
                     if (stockData.tlong && !isNaN(stockData.tlong)) 
                     {
@@ -138,7 +128,6 @@ async function main()
             {
                 map.set(userId, []);
             }
-
             return map.get(userId);
         }
 
@@ -152,6 +141,11 @@ async function main()
             return `${alert.stockCode} 交易量達平均的 ${alert.multiplier.toFixed(2)} 倍`;
         }
 
+        function describeChangeAlert(alert)
+        {
+            return `${alert.stockCode} 漲跌幅超過 ${alert.changePercent.toFixed(2)}%`;
+        }
+
         async function checkAlerts()
         {
             const stockCodes = new Set();
@@ -160,8 +154,11 @@ async function main()
             {
                 alerts.forEach(alert => stockCodes.add(alert.stockCode));
             }
-
             for (const alerts of userVolumeAlerts.values())
+            {
+                alerts.forEach(alert => stockCodes.add(alert.stockCode));
+            }
+            for (const alerts of userChangeAlerts.values())
             {
                 alerts.forEach(alert => stockCodes.add(alert.stockCode));
             }
@@ -169,7 +166,6 @@ async function main()
             for (const stockCode of stockCodes)
             {
                 let stockData;
-
                 try
                 {
                     stockData = await fetchStockData(stockCode);
@@ -180,12 +176,12 @@ async function main()
                     continue;
                 }
 
-                if (!stockData)
-                {
-                    continue;
-                }
+                if (!stockData) continue;
 
                 const currentPrice = parseFloat(stockData.z) || 0;
+                const previousClose = parseFloat(stockData.y) || currentPrice;
+                const priceChange = currentPrice - previousClose;
+                const percentageChange = previousClose !== 0 ? (priceChange / previousClose * 100) : 0;
                 const currentVolume = parseFloat(stockData.v) || 0;
                 const stockName = stockNames[stockCode] || stockCode;
 
@@ -193,7 +189,6 @@ async function main()
                 for (const [userId, alerts] of userPriceAlerts.entries())
                 {
                     const remaining = [];
-
                     for (const alert of alerts)
                     {
                         if (alert.stockCode !== stockCode)
@@ -220,15 +215,38 @@ ${stockName} (${stockCode}) 已${directionText} ${alert.targetPrice.toFixed(2)}
                             remaining.push(alert);
                         }
                     }
+                    if (remaining.length > 0) userPriceAlerts.set(userId, remaining);
+                    else userPriceAlerts.delete(userId);
+                }
 
-                    if (remaining.length > 0)
+                // Change alerts
+                for (const [userId, alerts] of userChangeAlerts.entries())
+                {
+                    const remaining = [];
+                    for (const alert of alerts)
                     {
-                        userPriceAlerts.set(userId, remaining);
+                        if (alert.stockCode !== stockCode)
+                        {
+                            remaining.push(alert);
+                            continue;
+                        }
+
+                        let trigger = Math.abs(percentageChange) >= alert.changePercent;
+                        if (trigger)
+                        {
+                            const message = `🚨 漲跌幅警報
+${stockName} (${stockCode}) 當日漲跌幅已達 ${percentageChange.toFixed(2)}%`;
+
+                            client.pushMessage(userId, { type: 'text', text: message })
+                                .catch(err => console.error('推送漲跌幅警報失敗:', err));
+                        }
+                        else
+                        {
+                            remaining.push(alert);
+                        }
                     }
-                    else
-                    {
-                        userPriceAlerts.delete(userId);
-                    }
+                    if (remaining.length > 0) userChangeAlerts.set(userId, remaining);
+                    else userChangeAlerts.delete(userId);
                 }
 
                 // Volume alerts
@@ -238,7 +256,6 @@ ${stockName} (${stockCode}) 已${directionText} ${alert.targetPrice.toFixed(2)}
                 for (const [userId, alerts] of userVolumeAlerts.entries())
                 {
                     const remaining = [];
-
                     for (const alert of alerts)
                     {
                         if (alert.stockCode !== stockCode)
@@ -248,7 +265,6 @@ ${stockName} (${stockCode}) 已${directionText} ${alert.targetPrice.toFixed(2)}
                         }
 
                         let trigger = false;
-
                         if (history.length >= VOLUME_MIN_SAMPLES && averageVolume > 0)
                         {
                             trigger = currentVolume >= averageVolume * alert.multiplier;
@@ -268,15 +284,8 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                             remaining.push(alert);
                         }
                     }
-
-                    if (remaining.length > 0)
-                    {
-                        userVolumeAlerts.set(userId, remaining);
-                    }
-                    else
-                    {
-                        userVolumeAlerts.delete(userId);
-                    }
+                    if (remaining.length > 0) userVolumeAlerts.set(userId, remaining);
+                    else userVolumeAlerts.delete(userId);
                 }
 
                 history = [...history, currentVolume];
@@ -297,55 +306,41 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
             }
 
             const strUserMessage = event.message.text.trim().toUpperCase();
-            
-            // 檢查是否為股票查詢指令 (P + 股票代號)
+            const userId = event.source.userId;
+
+            // 股票查詢
             const stockPattern = /^P(\d{4})$/;
             const match = strUserMessage.match(stockPattern);
-            
             if (match) 
             {
                 const strStockCode = match[1];
                 const strStockInfo = await getStockInfo(strStockCode);
-                
-                const echo = 
-                {
-                    type: 'text',
-                    text: strStockInfo
-                };
-                
-                return client.replyMessage(event.replyToken, echo);
+                return client.replyMessage(event.replyToken, { type: 'text', text: strStockInfo });
             }
 
+            // 價格警報 (原始 ABOVE/BELOW)
             const priceAlertPattern = /^ALERT\s+(\d{4})\s+(ABOVE|BELOW)\s+(\d+(?:\.\d+)?)$/;
+            // 簡單警報
+            const simplePriceAlertPattern = /^ALERT\s+(\d{4})\s+(\d+(?:\.\d+)?)$/;
+            // 漲跌幅警報
+            const changeAlertPattern = /^ALERT\s+(\d{4})\s+CHANGE\s+(\d+(?:\.\d+)?)$/;
+
             const priceListPattern = /^ALERT\s+LIST$/;
             const priceClearPattern = /^ALERT\s+CLEAR$/;
             const volumeAlertPattern = /^VOL\s+(\d{4})\s+(\d+(?:\.\d+)?)$/;
             const volumeListPattern = /^VOL\s+LIST$/;
             const volumeClearPattern = /^VOL\s+CLEAR$/;
 
-            const userId = event.source.userId;
-
             if (priceAlertPattern.test(strUserMessage))
             {
                 const [, stockCode, direction, priceText] = strUserMessage.match(priceAlertPattern);
                 const targetPrice = parseFloat(priceText);
 
-                if (!userId)
-                {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: '❌ 僅支援對好友的價格警報' });
-                }
-
                 const userAlerts = getUserAlertBucket(userPriceAlerts, userId);
                 const existingIndex = userAlerts.findIndex(alert => alert.stockCode === stockCode && alert.direction === direction);
 
-                if (existingIndex >= 0)
-                {
-                    userAlerts[existingIndex].targetPrice = targetPrice;
-                }
-                else
-                {
-                    userAlerts.push({ stockCode, direction, targetPrice });
-                }
+                if (existingIndex >= 0) userAlerts[existingIndex].targetPrice = targetPrice;
+                else userAlerts.push({ stockCode, direction, targetPrice });
 
                 const stockName = stockNames[stockCode] || stockCode;
                 const ack = `✅ 已設定 ${stockName} (${stockCode}) ${direction === 'ABOVE' ? '向上突破' : '向下跌破'} ${targetPrice.toFixed(2)} 的價格警報`;
@@ -353,41 +348,75 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                 return client.replyMessage(event.replyToken, { type: 'text', text: ack });
             }
 
+            // 簡單警報
+            if (simplePriceAlertPattern.test(strUserMessage))
+            {
+                const [, stockCode, priceText] = strUserMessage.match(simplePriceAlertPattern);
+                const targetPrice = parseFloat(priceText);
+                const stockData = await fetchStockData(stockCode);
+
+                if (!stockData) return client.replyMessage(event.replyToken, { type: 'text', text: `❌ 查無股票代號 ${stockCode} 的資訊` });
+
+                const currentPrice = parseFloat(stockData.z) || 0;
+                const direction = currentPrice <= targetPrice ? 'ABOVE' : 'BELOW';
+
+                const userAlerts = getUserAlertBucket(userPriceAlerts, userId);
+                const existingIndex = userAlerts.findIndex(alert => alert.stockCode === stockCode && alert.direction === direction);
+
+                if (existingIndex >= 0) userAlerts[existingIndex].targetPrice = targetPrice;
+                else userAlerts.push({ stockCode, direction, targetPrice });
+
+                const stockName = stockNames[stockCode] || stockCode;
+                const ack = `✅ 已設定 ${stockName} (${stockCode}) ${direction === 'ABOVE' ? '向上突破' : '向下跌破'} ${targetPrice.toFixed(2)} 的價格警報
+（目前股價：${currentPrice.toFixed(2)}）`;
+
+                return client.replyMessage(event.replyToken, { type: 'text', text: ack });
+            }
+
+            // 漲跌幅警報
+            if (changeAlertPattern.test(strUserMessage))
+            {
+                const [, stockCode, percentText] = strUserMessage.match(changeAlertPattern);
+                const changePercent = parseFloat(percentText);
+
+                const alerts = getUserAlertBucket(userChangeAlerts, userId);
+                const existingIndex = alerts.findIndex(alert => alert.stockCode === stockCode);
+
+                if (existingIndex >= 0) alerts[existingIndex].changePercent = changePercent;
+                else alerts.push({ stockCode, changePercent });
+
+                const stockName = stockNames[stockCode] || stockCode;
+                const ack = `✅ 已設定 ${stockName} (${stockCode}) 漲跌幅超過 ${changePercent.toFixed(2)}% 的警報`;
+
+                return client.replyMessage(event.replyToken, { type: 'text', text: ack });
+            }
+
+            // 列表 / 清除
             if (priceListPattern.test(strUserMessage))
             {
-                if (!userId)
-                {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: '❌ 僅支援好友查詢價格警報列表' });
-                }
-
                 const alerts = userPriceAlerts.get(userId) || [];
-
-                if (alerts.length === 0)
+                const changeAlerts = userChangeAlerts.get(userId) || [];
+                if (alerts.length === 0 && changeAlerts.length === 0)
                 {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: '尚未設定任何價格警報' });
+                    return client.replyMessage(event.replyToken, { type: 'text', text: '尚未設定任何價格/漲跌幅警報' });
                 }
 
-                const lines = alerts.map(alert => `• ${describePriceAlert(alert)}`);
-                return client.replyMessage(event.replyToken, { type: 'text', text: `📋 價格警報列表\n${lines.join('\n')}` });
+                const lines = [
+                    ...alerts.map(alert => `• ${describePriceAlert(alert)}`),
+                    ...changeAlerts.map(alert => `• ${describeChangeAlert(alert)}`)
+                ];
+                return client.replyMessage(event.replyToken, { type: 'text', text: `📋 警報列表\n${lines.join('\n')}` });
             }
 
             if (priceClearPattern.test(strUserMessage))
             {
-                if (userId)
-                {
-                    userPriceAlerts.delete(userId);
-                }
-
-                return client.replyMessage(event.replyToken, { type: 'text', text: '✅ 已清除所有價格警報' });
+                userPriceAlerts.delete(userId);
+                userChangeAlerts.delete(userId);
+                return client.replyMessage(event.replyToken, { type: 'text', text: '✅ 已清除所有價格與漲跌幅警報' });
             }
 
             if (volumeAlertPattern.test(strUserMessage))
             {
-                if (!userId)
-                {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: '❌ 僅支援好友設定量能警報' });
-                }
-
                 const [, stockCode, multiplierText] = strUserMessage.match(volumeAlertPattern);
                 const multiplier = parseFloat(multiplierText);
 
@@ -399,14 +428,8 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                 const alerts = getUserAlertBucket(userVolumeAlerts, userId);
                 const existingIndex = alerts.findIndex(alert => alert.stockCode === stockCode);
 
-                if (existingIndex >= 0)
-                {
-                    alerts[existingIndex].multiplier = multiplier;
-                }
-                else
-                {
-                    alerts.push({ stockCode, multiplier });
-                }
+                if (existingIndex >= 0) alerts[existingIndex].multiplier = multiplier;
+                else alerts.push({ stockCode, multiplier });
 
                 const stockName = stockNames[stockCode] || stockCode;
                 const ack = `✅ 已設定 ${stockName} (${stockCode}) 量能達平均 ${multiplier.toFixed(2)} 倍的警報`;
@@ -416,13 +439,7 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
 
             if (volumeListPattern.test(strUserMessage))
             {
-                if (!userId)
-                {
-                    return client.replyMessage(event.replyToken, { type: 'text', text: '❌ 僅支援好友查詢量能警報列表' });
-                }
-
                 const alerts = userVolumeAlerts.get(userId) || [];
-
                 if (alerts.length === 0)
                 {
                     return client.replyMessage(event.replyToken, { type: 'text', text: '尚未設定任何量能警報' });
@@ -434,50 +451,52 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
 
             if (volumeClearPattern.test(strUserMessage))
             {
-                if (userId)
-                {
-                    userVolumeAlerts.delete(userId);
-                }
-
+                userVolumeAlerts.delete(userId);
                 return client.replyMessage(event.replyToken, { type: 'text', text: '✅ 已清除所有量能警報' });
             }
-            
-            // 如果不是股票查詢指令，回覆使用說明
+
             if (strUserMessage === 'HELP' || strUserMessage === '幫助') 
             {
                 const helpMessage = `📱 股票查詢機器人使用說明
 
-🔍 查詢即時資訊：輸入 P + 股票代號
-　　例：P2330 查詢台積電
+🔍 查詢即時資訊
+P + 股票代號
+例如：P2330 (查詢台積電)
 
-🚨 價格警報：輸入 ALERT 股票代號 ABOVE/BELOW 價格
-　　例：ALERT 2330 ABOVE 650（股價向上突破 650 時提醒）
-　　例：ALERT 2317 BELOW 100（股價向下跌破 100 時提醒）
-　　ALERT LIST 可查看目前設定；ALERT CLEAR 會清除全部價格警報
+🚨 價格警報
+1. ALERT 股票代號 ABOVE/BELOW 價格
+   例如：ALERT 2330 ABOVE 650
+2. 簡單版：ALERT 股票代號 價格
+   例如：ALERT 2330 650
+   → 會自動判斷是突破還是跌破
 
-📈 量能警報：輸入 VOL 股票代號 倍數 (>1)
-　　例：VOL 2330 2.5（成交量達近期期均量 2.5 倍時提醒）
-　　VOL LIST 可查看目前設定；VOL CLEAR 會清除全部量能警報
+📊 漲跌幅警報
+ALERT 股票代號 CHANGE 百分比
+例如：ALERT 2330 CHANGE 5
+→ 當日漲跌幅超過 ±5% 通知
 
-💡 任何時候輸入 HELP 可再次取得此說明`;
+📈 量能警報
+VOL 股票代號 倍數(>1)
+例如：VOL 2330 2.5
+其他指令：VOL LIST、VOL CLEAR
 
-                const echo = 
-                {
-                    type: 'text',
-                    text: helpMessage
-                };
-                
-                return client.replyMessage(event.replyToken, echo);
+📋 查詢或清除警報
+ALERT LIST → 查看所有價格與漲跌幅警報
+ALERT CLEAR → 清除所有價格與漲跌幅警報
+VOL LIST → 查看量能警報
+VOL CLEAR → 清除量能警報
+
+💡 輸入 HELP 查看此說明`;
+
+                return client.replyMessage(event.replyToken, { type: 'text', text: helpMessage });
             }
-            
+
             return Promise.resolve(null);
         }
 
-        // 設定 webhook
         app.post('/callback', line.middleware(config), (req, res) => 
         {
-            Promise
-                .all(req.body.events.map(handleEvent))
+            Promise.all(req.body.events.map(handleEvent))
                 .then((result) => res.json(result))
                 .catch((err) => 
                 {
@@ -486,13 +505,11 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                 });
         });
 
-        // 健康檢查端點
         app.get('/health', (req, res) => 
         {
             res.json({ status: 'OK', timestamp: new Date().toISOString() });
         });
 
-        // 啟動伺服器
         const iPort = process.env.PORT || 3000;
         app.listen(iPort, () => 
         {
@@ -513,5 +530,4 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
     }
 }
 
-// 啟動主程式
 main().catch(console.error);
