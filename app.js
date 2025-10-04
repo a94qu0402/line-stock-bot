@@ -56,6 +56,22 @@ async function main()
             '3008': '大立光'
         };
 
+        function resolveStockName(stockCode, stockData)
+        {
+            const apiName = stockData && typeof stockData.n === 'string' ? stockData.n.trim() : '';
+            if (apiName)
+            {
+                return apiName;
+            }
+
+            if (stockNames[stockCode])
+            {
+                return stockNames[stockCode];
+            }
+
+            return stockCode;
+        }
+
         async function fetchStockData(strStockCode)
         {
             const strUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${strStockCode}.tw`;
@@ -76,7 +92,7 @@ async function main()
 
                 if (stockData)
                 {
-                    const strStockName = stockNames[strStockCode] || strStockCode;
+                    const strStockName = resolveStockName(strStockCode, stockData);
                     const fCurrentPrice = parseFloat(stockData.z) || 0;
                     const fPreviousClose = parseFloat(stockData.y) || fCurrentPrice;
                     const fPriceChange = fCurrentPrice - fPreviousClose;
@@ -183,7 +199,7 @@ async function main()
                 const priceChange = currentPrice - previousClose;
                 const percentageChange = previousClose !== 0 ? (priceChange / previousClose * 100) : 0;
                 const currentVolume = parseFloat(stockData.v) || 0;
-                const stockName = stockNames[stockCode] || stockCode;
+                const stockName = resolveStockName(stockCode, null);
 
                 // Price alerts
                 for (const [userId, alerts] of userPriceAlerts.entries())
@@ -342,7 +358,7 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                 if (existingIndex >= 0) userAlerts[existingIndex].targetPrice = targetPrice;
                 else userAlerts.push({ stockCode, direction, targetPrice });
 
-                const stockName = stockNames[stockCode] || stockCode;
+                const stockName = resolveStockName(stockCode, null);
                 const ack = `✅ 已設定 ${stockName} (${stockCode}) ${direction === 'ABOVE' ? '向上突破' : '向下跌破'} ${targetPrice.toFixed(2)} 的價格警報`;
 
                 return client.replyMessage(event.replyToken, { type: 'text', text: ack });
@@ -366,7 +382,7 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
                 if (existingIndex >= 0) userAlerts[existingIndex].targetPrice = targetPrice;
                 else userAlerts.push({ stockCode, direction, targetPrice });
 
-                const stockName = stockNames[stockCode] || stockCode;
+                const stockName = resolveStockName(stockCode, stockData);
                 const ack = `✅ 已設定 ${stockName} (${stockCode}) ${direction === 'ABOVE' ? '向上突破' : '向下跌破'} ${targetPrice.toFixed(2)} 的價格警報
 （目前股價：${currentPrice.toFixed(2)}）`;
 
