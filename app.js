@@ -447,18 +447,19 @@ ${stockName} (${stockCode}) 目前成交量 ${currentVolume.toFixed(0)}
             {
                 const helpMessage = `📱 股票查詢機器人使用說明
 
-🔍 查詢即時資訊：P + 股票代號
-例如：P2330 (查詢台積電)
+🔍 查詢即時資訊：輸入 P + 股票代號
+　　例：P2330 查詢台積電
 
-🚨 價格警報：ALERT 股票代號 ABOVE/BELOW 價格
-例如：ALERT 2330 ABOVE 650
-其他指令：ALERT LIST、ALERT CLEAR
+🚨 價格警報：輸入 ALERT 股票代號 ABOVE/BELOW 價格
+　　例：ALERT 2330 ABOVE 650（股價向上突破 650 時提醒）
+　　例：ALERT 2317 BELOW 100（股價向下跌破 100 時提醒）
+　　ALERT LIST 可查看目前設定；ALERT CLEAR 會清除全部價格警報
 
-📈 量能警報：VOL 股票代號 倍數(>1)
-例如：VOL 2330 2.5
-其他指令：VOL LIST、VOL CLEAR
+📈 量能警報：輸入 VOL 股票代號 倍數 (>1)
+　　例：VOL 2330 2.5（成交量達近期期均量 2.5 倍時提醒）
+　　VOL LIST 可查看目前設定；VOL CLEAR 會清除全部量能警報
 
-💡 輸入 HELP 查看此說明`;
+💡 任何時候輸入 HELP 可再次取得此說明`;
 
                 const echo = 
                 {
